@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Video Conference</title>
+</head>
+<body>
+	<h1>Video Conference</h1>
+	<video id="remoteVideo" autoplay playsinline></video>
+	<video id="localVideo" autoplay muted playsinline></video>
+	<script>
+		const remoteVideo = document.getElementById('remoteVideo');
+		const localVideo = document.getElementById('localVideo');
+		const ws = new WebSocket('ws://' + location.host + '/ws');
+
+		ws.onopen = async () => {
+			const config = { 'iceServers': [{'urls': 'stun:stun.l.google.com:19302'}] };
+			const pc = new RTCPeerConnection(config);
+
+			pc.ontrack = (event) => {
+				remoteVideo.srcObject = event.streams[0];
+			};
+
+			pc.onicecandidate = (event) => {
+				if (event.candidate) {
+					ws.send(JSON.stringify({ 'candidate': event.candidate }));
+				}
+			};
+
+			const constraints = { 'video': true, 'audio': true };
+			const stream = await navigator.mediaDevices.getUserMedia(constraints);
+			localVideo.srcObject = stream;
+
+			stream.getTracks().forEach((track) => {
+				pc.addTrack(track, stream);
+			});
+
+			const offer = await pc.createOffer();
+			await pc.setLocalDescription(offer);
+
+			ws.send(JSON.stringify({ 'sdp': pc.localDescription }));
+
+			ws.onmessage = async (message) => {
+				const data = JSON.parse(message.data);
+
+				if (data.sdp) {
+					await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+
+					if (data.sdp.type === 'offer') {
+						const answer = await pc.createAnswer();
+						await pc.setLocalDescription(answer);
+						ws.send(JSON.stringify({ 'sdp': pc.localDescription }));
+					}
+				} else if (data.candidate) {
+					await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+				}
+			};
+		};
+	</script>
+</body>
+</html>
