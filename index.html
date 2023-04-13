@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Conference System</title>
+    <style>
+        form {
+            display: inline-block;
+            margin-right: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Video Conference System</h1>
+    <form id="register-form">
+        <h2>Register</h2>
+        <input type="text" id="register-email" placeholder="Email" required>
+        <input type="password" id="register-password" placeholder="Password" required>
+        <button type="submit">Register</button>
+    </form>
+    <form id="login-form">
+        <h2>Login</h2>
+        <input type="text" id="login-email" placeholder="email" required>
+        <input type="password" id="login-password" placeholder="Password" required>
+        <button type="submit">Login</button>
+    </form>
+    <script>
+        document.getElementById("register-form").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const email = document.getElementById("register-email").value;
+            const password = document.getElementById("register-password").value;
+            const response = await fetch("/register", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ email, password }),
+            });
+
+            if (response.status === 201) {
+                alert("Registration successful!");
+            } else {
+                alert("Registration failed!");
+            }
+        });
+
+        document.getElementById("login-form").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const email = document.getElementById("login-email").value;
+            const password = document.getElementById("login-password").value;
+            const response = await fetch("/protected_route", {
+    method: "GET",
+    headers: {
+        "Authorization": "Bearer " + token, // Добавьте схему "Bearer"
+    },
+});
+            
+            if (response.status === 200) {
+    const data = await response.json();
+    const token = localStorage.getItem("token");
+
+    // Сохраняем токен в localStorage
+    localStorage.setItem("token", token);
+    alert("Login successful!");
+    window.location.href = "/home.html"; // Перенаправление на страницу видеоконференции
+} else {
+    alert("Login failed!");
+}
+
+        });
+    </script>
+</body>
+</html>
