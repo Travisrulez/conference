@@ -59,6 +59,7 @@ func main() {
     })
     router.HandleFunc("/register", registerHandler).Methods("POST")
     router.HandleFunc("/login", loginHandler).Methods("POST")
+	http.HandleFunc("/conference", homeHandler)
 
     // Защищаем маршрут с помощью authMiddleware
     protectedRoutes := router.PathPrefix("/").Subrouter()
@@ -68,6 +69,20 @@ func main() {
     log.Printf("Server started on localhost:8080")
     log.Fatal(http.ListenAndServe(":8080", router))
 }
+
+func createToken(u_id int) (string, error) {
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+        "u_id": u_id,
+    })
+
+    tokenString, err := token.SignedString([]byte(jwtSecret))
+    if err != nil {
+        return "", err
+    }
+
+    return tokenString, nil
+}
+
 
 func registerHandler(w http.ResponseWriter, r *http.Request) {
     var user User
@@ -121,46 +136,43 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
     var user User
+
     err := json.NewDecoder(r.Body).Decode(&user)
     if err != nil {
-        http.Error(w, err.Error(), http.StatusBadRequest)
+        http.Error(w, "Bad Request", http.StatusBadRequest)
         return
     }
 
     db := connectToDatabase()
     defer db.Close()
 
-    row := db.QueryRow("SELECT u_id, password FROM user WHERE email = ?", user.Email) // Изменено с "users"
-    var storedPassword string
-    err = row.Scan(&user.U_ID, &storedPassword)
+    var dbUser User
+    err = db.QueryRow("SELECT u_id, email, password FROM user WHERE email=?", user.Email).Scan(&dbUser.U_ID, &dbUser.Email, &dbUser.Password)
     if err != nil {
-        http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+        if err == sql.ErrNoRows {
+            http.Error(w, "Unauthorized", http.StatusUnauthorized)
+            return
+        }
+        log.Printf("Error querying user: %v", err)
+        http.Error(w, "Internal Server Error", http.StatusInternalServerError)
         return
     }
 
-    if storedPassword != user.Password {
-        http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-        return
-    }
-
-    token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-        "u_id":  user.U_ID,
-        "email": user.Email,
-    })
-
-    tokenString, err := token.SignedString(jwtSecret)
+    err = bcrypt.CompareHashAndPassword([]byte(dbUser.Password), []byte(user.Password))
     if err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
+        http.Error(w, "Unauthorized", http.StatusUnauthorized)
         return
     }
 
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(map[string]string{
-        "token": tokenString,
-    })
+    token, err := createToken(dbUser.U_ID)
+    if err != nil {
+        log.Printf("Error creating token: %v", err)
+        http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+        return
+    }
+
+    json.NewEncoder(w).Encode(map[string]string{"token": token})
 }
-
-
 
 func authMiddleware(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -199,6 +211,7 @@ func authMiddleware(next http.Handler) http.Handler {
 
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
+	// http.ServeFile(w, r, "home.html")
 	tmpl := template.Must(template.ParseFiles("home.html"))
 	tmpl.Execute(w, nil)
 }
