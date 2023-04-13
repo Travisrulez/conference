@@ -74,16 +74,37 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
+    if user.Email == "" || user.Password == "" {
+        http.Error(w, "Email and password are required", http.StatusBadRequest)
+        return
+    }
+
     db := connectToDatabase()
     defer db.Close()
 
-    _, err = db.Exec("INSERT INTO user (email, password) VALUES (?, ?)", user.Email, user.Password)
+    var existingUserID int
+    err = db.QueryRow("SELECT u_id FROM user WHERE email = ?", user.Email).Scan(&existingUserID)
+    if err != sql.ErrNoRows && existingUserID != 0 {
+        http.Error(w, "A user with this email already exists", http.StatusConflict)
+        return
+    }
+
+    result, err := db.Exec("INSERT INTO user (email, password) VALUES (?, ?)", user.Email, user.Password)
     if err != nil {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
     }
 
+    lastInsertId, err := result.LastInsertId()
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    user.U_ID = int(lastInsertId) // Преобразование int64 в int
+
+    w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusCreated)
+    json.NewEncoder(w).Encode(user)
 }
 
 
@@ -98,9 +119,9 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
     db := connectToDatabase()
     defer db.Close()
 
-    row := db.QueryRow("SELECT u_id, password FROM user WHERE email = ?", user.Email) // Изменено с "id"
+    row := db.QueryRow("SELECT u_id, password FROM user WHERE email = ?", user.Email) // Изменено с "users"
     var storedPassword string
-    err = row.Scan(&user.U_ID, &storedPassword) // Изменено с "ID"
+    err = row.Scan(&user.U_ID, &storedPassword)
     if err != nil {
         http.Error(w, "Invalid credentials", http.StatusUnauthorized)
         return
@@ -111,25 +132,23 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Создаем новый JWT-токен
     token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-        "u_id":  user.U_ID, // Изменено с "id"
+        "u_id":  user.U_ID,
         "email": user.Email,
     })
 
-    // Подписываем токен с нашим секретным ключом
     tokenString, err := token.SignedString(jwtSecret)
     if err != nil {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
     }
 
-    // Отправляем токен клиенту
     w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(map[string]string{
         "token": tokenString,
     })
 }
+
 
 
 func authMiddleware(next http.Handler) http.Handler {
