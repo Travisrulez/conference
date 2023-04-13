@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v3"
 	"github.com/pion/webrtc/v3/pkg/media"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // var upgrader = websocket.Upgrader{
@@ -23,6 +24,20 @@ import (
 // 		return true
 // 	},
 // }
+
+func connectToDatabase() *sql.DB {
+    dsn := "root:root@tcp(localhost:3306)/conference?charset=utf8mb4&parseTime=True&loc=Local"
+    db, err := sql.Open("mysql", dsn)
+    if err != nil {
+        log.Fatalf("Error opening database: %v", err)
+    }
+    err = db.Ping()
+    if err != nil {
+        log.Fatalf("Error connecting to database: %v", err)
+    }
+    return db
+}
+
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -54,18 +69,6 @@ func main() {
     log.Fatal(http.ListenAndServe(":8080", router))
 }
 
-
-func connectToDatabase() *sql.DB {
-    dsn := "root:root@tcp(localhost:3306)/diplom?charset=utf8&parseTime=True&loc=Local"
-
-    db, err := sql.Open("mysql", dsn)
-    if err != nil {
-        log.Fatalf("Error connecting to database: %v", err)
-    }
-
-    return db
-}
-
 func registerHandler(w http.ResponseWriter, r *http.Request) {
     var user User
     err := json.NewDecoder(r.Body).Decode(&user)
@@ -89,7 +92,14 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    result, err := db.Exec("INSERT INTO user (email, password) VALUES (?, ?)", user.Email, user.Password)
+    // Хеширование пароля перед сохранением в базе данных
+    hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    result, err := db.Exec("INSERT INTO user (email, password) VALUES (?, ?)", user.Email, string(hashedPassword))
     if err != nil {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
@@ -100,12 +110,13 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
     }
-    user.U_ID = int(lastInsertId) // Преобразование int64 в int
+    user.U_ID = int(lastInsertId)
 
     w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusCreated)
     json.NewEncoder(w).Encode(user)
 }
+
 
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
